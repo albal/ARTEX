@@ -32,10 +32,10 @@ import { cn } from "@/lib/utils";
 
 import { ProfileRetryFields, RetryPolicyPanel, ZERO_OVERRIDE } from "./_components/retry";
 
-// 思考开关(thinking.type)与思考强度(reasoning_effort)是两个【互相独立】的字段，
-// 各自单独设置——有些接口没有 thinking 字段、只靠强度参数就能激活思考，故需解耦。
-// 存库空字符串 = 该字段【不发送】；Radix Select 不接受空 value，故 UI 用 "none"
-// 哨兵表示不发送，存取时与 "" 互转（NONE / fromStore / toStore）。
+// The thinking toggle (thinking.type) and thinking effort (reasoning_effort) are two INDEPENDENT fields,
+// each set separately; some APIs have no thinking field and activate thinking via the effort parameter alone, so they must be decoupled.
+// An empty string in storage = the field is NOT sent; Radix Select does not accept an empty value, so the UI uses a "none"
+// sentinel for not sent, converting to and from "" on read/write (NONE / fromStore / toStore).
 const NONE = "none";
 const fromStore = (v?: string) => (v ? v : NONE);
 const toStore = (v: string) => (v === NONE ? "" : v);
@@ -44,12 +44,12 @@ const THINKING_TYPES: { value: string; label: string }[] = [
   { value: "disabled", label: "Close" },
   { value: "enabled", label: "Enable" },
 ];
-// 输出上限用哪个请求字段名（仅 openai 格式有意义）。NONE ↔ "" 走同一套哨兵转换。
+// Which request field name the output limit uses (only meaningful for openai format). NONE ↔ "" uses the same sentinel conversion.
 const MAX_TOKENS_FIELDS: { value: string; label: string }[] = [
   { value: NONE, label: "max_tokens (Default)" },
   { value: "max_completion_tokens", label: "max_completion_tokens" },
 ];
-// 另外两种格式各自定死了字段名，选项对它们无意义，说明文案里直接讲清楚。
+// The other two formats each have a fixed field name, so the option is meaningless for them; the help text says so directly.
 const MAX_TOKENS_FIELD_HINTS: Record<string, string> = {
   openai:
     "Which key to send for limit. max_tokens is default and recognized by most compatible gateways; OpenAI official inference models (o-series / GPT-5) only accept max_completion_tokens and will error on max_tokens. unsupported_parameter.",
@@ -71,8 +71,8 @@ function cooldownText(secs: number) {
   return `${Math.ceil(secs / 60)}min`;
 }
 
-// 一个配置在卡片上显示的「是否正常」。没填 Key 的配置根本发不出请求，比熔断更该先说；
-// 其余状态来自轮询的熔断记录（轮询关着时不会产生新记录，此时「正常」= 没有已知故障）。
+// The "is it healthy" state shown on a profile card. A profile with no key cannot send requests at all, which matters more than a tripped breaker;
+// the other states come from the rotation's circuit breaker records (with rotation off no new records are produced, so "healthy" = no known faults).
 type Health = { label: string; cls: string; hint?: string };
 function healthOf(p: LLMProfile, m?: LLMPoolMember): Health {
   if (!p.api_key_hint) {
@@ -100,7 +100,7 @@ function healthOf(p: LLMProfile, m?: LLMPoolMember): Health {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 轮询配置抽屉
+// Rotation settings drawer
 // ─────────────────────────────────────────────────────────────────────────────
 
 function PoolSheet({
@@ -116,7 +116,7 @@ function PoolSheet({
 }) {
   const [busy, setBusy] = React.useState(false);
 
-  // 冷却倒计时是后端算出的剩余秒数——抽屉开着且有配置不正常时才定时拉，让它走起来。
+  // The cool-down countdown is the seconds remaining as computed by the backend; poll on a timer only while the drawer is open and a profile is unhealthy, so it keeps ticking.
   React.useEffect(() => {
     if (!open || !pool?.enabled || !pool.chain.some((m) => m.state !== "ok")) return;
     const t = setInterval(() => void onReload(), 10_000);
@@ -153,7 +153,7 @@ function PoolSheet({
 
   const enabled = pool?.enabled ?? false;
   const chain = pool?.chain ?? [];
-  // 参与轮询的成员（排除被标记「不参与轮询」的），顺序即后端实际的尝试顺序。
+  // Members taking part in rotation (excluding those marked "exclude from rotation"); the order is the backend's actual attempt order.
   const inChain = chain.filter((m) => m.active || !m.excluded);
   const tripped = chain.filter((m) => m.state === "tripped");
 
@@ -295,7 +295,7 @@ function PoolSheet({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 模型配置抽屉（新建 / 编辑共用同一套表单）
+// Model profile drawer (new / edit share the same form)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ProfileSheet({
@@ -304,7 +304,7 @@ function ProfileSheet({
   onOpenChange,
   onSaved,
 }: {
-  profile: LLMProfile | null; // null = 新建
+  profile: LLMProfile | null; // null = new
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onSaved: (id: string) => void;
@@ -319,24 +319,24 @@ function ProfileSheet({
   const [keyHint, setKeyHint] = React.useState("");
   const [rps, setRps] = React.useState("0");
   const [rpm, setRpm] = React.useState("0");
-  const [cw, setCw] = React.useState("0"); // 上下文窗口(K tokens);0=默认200K
+  const [cw, setCw] = React.useState("0"); // context window (K tokens); 0 = default 200K
   const [thinkingType, setThinkingType] = React.useState(NONE);
   const [effort, setEffort] = React.useState(NONE);
-  const [priority, setPriority] = React.useState("0"); // 轮询顺位;越大越先
+  const [priority, setPriority] = React.useState("0"); // rotation priority; higher goes first
   const [poolExclude, setPoolExclude] = React.useState(false);
-  const [streaming, setStreaming] = React.useState(true); // true=流式(默认);false=非流式
-  const [maxTokens, setMaxTokens] = React.useState("0"); // 单次回复输出上限;0=不发送
-  const [maxTokensField, setMaxTokensField] = React.useState(NONE); // 上限用哪个字段名;NONE=max_tokens
-  const [sessionHeaderKey, setSessionHeaderKey] = React.useState(""); // 自定义会话头名;空=不发送
-  const [retry, setRetry] = React.useState<LLMRetryOverride>(ZERO_OVERRIDE); // 本配置的重试覆盖;全 0=跟随全局
+  const [streaming, setStreaming] = React.useState(true); // true = streaming (default); false = non-streaming
+  const [maxTokens, setMaxTokens] = React.useState("0"); // output limit for a single reply; 0 = not sent
+  const [maxTokensField, setMaxTokensField] = React.useState(NONE); // which field name the limit uses; NONE = max_tokens
+  const [sessionHeaderKey, setSessionHeaderKey] = React.useState(""); // custom session header name; empty = not sent
+  const [retry, setRetry] = React.useState<LLMRetryOverride>(ZERO_OVERRIDE); // this profile's retry overrides; all 0 = follow the global policy
   const [testing, setTesting] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [models, setModels] = React.useState<string[]>([]);
   const [loadingModels, setLoadingModels] = React.useState(false);
   const [modelsOpen, setModelsOpen] = React.useState(false);
 
-  // 每次打开时从传入的 profile 灌一遍表单（新建则重置为默认值）。抽屉关掉再打开
-  // 就是一次干净的开始，不会留下上一个配置的残影。
+  // Each time it opens, fill the form from the passed profile (reset to defaults for a new one). Closing and reopening the drawer
+  // is a clean start, with no leftovers from the previous profile.
   React.useEffect(() => {
     if (!open) return;
     setName(profile?.name ?? "");
@@ -388,8 +388,8 @@ function ProfileSheet({
     if (testing) return;
     setTesting(true);
     try {
-      // 用配置实际会跑的思考参数来测，这样不支持该字段的模型在这里就失败，
-      // 而不是等到跑任务时才炸。传 profile id：Key 输入框留空时用已存的 Key。
+      // Test with the thinking parameters the profile will actually run with, so models that do not support the field fail here
+      // rather than blowing up when a task runs. The profile id is passed: when the key input is left blank the saved key is used.
       const r = await api.testLLM(
         format,
         model,
@@ -402,7 +402,7 @@ function ProfileSheet({
         streaming,
         sessionHeaderKey.trim(),
       );
-      // 回复内容一并展示：看得见模型确实说了话，才算和会话里跑通是一回事。
+      // Show the reply too: only when you can see the model actually said something does it count as working the same way it would in a session.
       if (r.ok)
         toast.success(`Connection successful · ${r.latency_ms ?? "?"}ms · ${r.model ?? model}`, {
           description: r.reply ? `Reply: ${r.reply}` : undefined,
@@ -440,8 +440,8 @@ function ProfileSheet({
         pool_exclude: poolExclude,
         streaming,
         max_tokens: Math.max(0, Number(maxTokens) || 0),
-        // 字段名开关只对 openai(Chat Completions) 有意义，其它格式一律回落到默认；
-        // 后端也会再做一次同样的归一化，这里只是别让 UI 送出自相矛盾的值。
+        // The field name toggle only means anything for openai (Chat Completions); other formats always fall back to the default;
+        // the backend applies the same normalisation again, this just stops the UI sending contradictory values.
         max_tokens_field: format === "openai" ? toStore(maxTokensField) : "",
         session_header_key: sessionHeaderKey.trim(),
         retry,
@@ -788,8 +788,8 @@ export default function LLMPage() {
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [pool, setPool] = React.useState<LLMPoolStatus | null>(null);
   const [poolOpen, setPoolOpen] = React.useState(false);
-  // 抽屉的开关和内容分开存：关闭时 editing 保持不变，否则关闭动画期间标题会从
-  // 「编辑 X」闪成「新建」。editing = null 表示新建。
+  // The drawer's open state and its contents are stored separately: editing stays unchanged on close, otherwise during the close animation the title would flash from
+  // "Edit X" to "New". editing = null means new.
   const [editOpen, setEditOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<LLMProfile | null>(null);
   const openEditor = React.useCallback((p: LLMProfile | null) => {
@@ -818,7 +818,7 @@ export default function LLMPage() {
     void load();
   }, [load]);
 
-  // 卡片上的健康徽章按 profile id 取轮询状态。
+  // The health badge on each card looks up rotation status by profile id.
   const health = React.useMemo(() => {
     const m = new Map<string, LLMPoolMember>();
     for (const c of pool?.chain ?? []) m.set(c.profile_id, c);
@@ -886,7 +886,7 @@ export default function LLMPage() {
             {profiles.map((p) => {
               const h = healthOf(p, health.get(p.id));
               return (
-                // biome-ignore lint/a11y/useSemanticElements: 卡片内含自己的操作按钮，用原生 <button> 会造成按钮嵌套（非法 HTML）
+                // biome-ignore lint/a11y/useSemanticElements: the card contains its own action buttons, and a native <button> would nest buttons (invalid HTML)
                 <Card
                   key={p.id}
                   role="button"
@@ -934,7 +934,7 @@ export default function LLMPage() {
                       {p.reasoning_effort && (
                         <span>Reasoning {p.reasoning_effort === "off" ? "Off" : p.reasoning_effort}</span>
                       )}
-                      {/* 轮询相关的两个字段只在轮询开着时才有意义，关着时不占版面 */}
+                      {/* The two rotation-related fields only mean anything while rotation is on, so they take no space when it is off */}
                       {poolOn &&
                         !p.is_default &&
                         (p.pool_exclude ? <span>Not in polling</span> : <span>Priority {p.priority ?? 0}</span>)}

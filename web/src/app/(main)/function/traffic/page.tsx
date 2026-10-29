@@ -249,7 +249,7 @@ export default function TrafficPage() {
     [hosts, hostCountSortDirection],
   );
 
-  // "清空" for the unfiltered purge, "删除" for the host-scoped ones — the dialog's
+  // "Clear" for the unfiltered purge, "Delete" for the host-scoped ones — the dialog's
   // title and its confirm button both follow from which is in play.
   const deleteVerb = deleteMode === "all" ? "Clear" : "Delete";
   const deleteTitle = deleteMode
@@ -796,7 +796,7 @@ export default function TrafficPage() {
                 <>
                   Will permanently delete <span className="font-semibold tabular-nums">{selectedHosts.length}</span> targets (
                   <span className="font-mono">
-                    {selectedHosts.slice(0, 3).join("、")}
+                    {selectedHosts.slice(0, 3).join(", ")}
                     {selectedHosts.length > 3 ? "…" : ""}
                   </span>
                   ) All traffic records (including original request/response); this action cannot be undone.

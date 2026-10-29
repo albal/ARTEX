@@ -37,9 +37,9 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
     if (auth.getToken()) {
       setAuthed(true);
     } else {
-      // 客户端守卫认为未登录时，必须同时清掉 cookie：否则 proxy.ts 仅凭
-      // “cookie 存在”就把我们从 /login 又重定向回主界面，与本守卫来回弹跳
-      // 形成无限重定向 → 白屏（cookie 与 localStorage 不一致时触发）。
+      // When the client guard decides we are not signed in, the cookie must be cleared too: otherwise proxy.ts, going only on
+      // "the cookie exists", redirects us from /login back to the main interface, bouncing back and forth with this guard
+      // in an infinite redirect → blank screen (triggered when the cookie and localStorage disagree).
       auth.clearToken();
       window.location.href = "/login";
     }

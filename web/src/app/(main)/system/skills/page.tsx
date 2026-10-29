@@ -196,7 +196,7 @@ function SkillsOverview({
         <p className="text-muted-foreground text-sm">Select a Skill on the left to view details and call history, or see overall usage here.</p>
       </div>
 
-      {/* 指标卡 */}
+      {/* Metric cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {stats.map((s) => (
           <div key={s.label} className="rounded-lg border p-3">
@@ -207,7 +207,7 @@ function SkillsOverview({
         ))}
       </div>
 
-      {/* 调用排行 */}
+      {/* Call ranking */}
       <div className="space-y-2">
         <Label className="text-xs text-muted-foreground">Call ranking</Label>
         {agg.ranked.length === 0 ? (
@@ -240,7 +240,7 @@ function SkillsOverview({
       </div>
 
       <div className="grid gap-6 sm:grid-cols-2">
-        {/* 最近调用 */}
+        {/* Recent calls */}
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground">Recent calls</Label>
           {agg.recent.length === 0 ? (
@@ -262,11 +262,11 @@ function SkillsOverview({
           )}
         </div>
 
-        {/* 未使用（可清理 / 需曝光） */}
+        {/* Unused (can be cleaned up / need more exposure) */}
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground">
             Unused Skill
-            {agg.neverUsed.length > 0 && <span className="ml-1 font-normal">（{agg.neverUsed.length}）</span>}
+            {agg.neverUsed.length > 0 && <span className="ml-1 font-normal">({agg.neverUsed.length})</span>}
           </Label>
           {agg.neverUsed.length === 0 ? (
             <p className="text-muted-foreground text-xs">All Skills have been called.</p>
@@ -334,8 +334,8 @@ export default function SkillsPage() {
   const [pendingDelete, setPendingDelete] = React.useState<PendingDelete>(null);
   const [deleting, setDeleting] = React.useState(false);
 
-  // 调用统计：列表页的次数/最近调用随 api.skills() 一起回来；选中某个 skill 时再拉它的
-  // 最近调用明细。missing = 被点名但不存在的 skill（想用但没有）。
+  // Call statistics: the list page's counts/recent calls come back with api.skills(); selecting a skill then fetches its
+  // recent call details. missing = skills that were named but do not exist (wanted but missing).
   const [usageCalls, setUsageCalls] = React.useState<SkillCall[]>([]);
   const [usageLoading, setUsageLoading] = React.useState(false);
   const [missing, setMissing] = React.useState<MissingSkill[]>([]);
@@ -707,7 +707,7 @@ export default function SkillsPage() {
           <h1 className="text-sm font-semibold leading-tight">Skill</h1>
           <p className="text-muted-foreground text-xs">Skill library · agentskills.io Specification · Visible per Agent authorization</p>
         </div>
-        {/* 缺口清单：agent 点名调用、但库里没有的 skill —— 直接是该补什么的依据。 */}
+        {/* Gap list: skills an agent asked for by name that are not in the library; a direct guide to what needs adding. */}
         {missing.length > 0 && (
           <Popover>
             <PopoverTrigger asChild>
@@ -734,7 +734,7 @@ export default function SkillsPage() {
         )}
       </div>
       <div className="flex flex-1 overflow-hidden">
-        {/* ── 左侧文件树 ── */}
+        {/* ── Left-hand file tree ── */}
         <div className="flex w-64 shrink-0 flex-col border-r">
           <div className="flex flex-col gap-2 border-b p-2">
             <Button size="sm" variant="outline" className="w-full" onClick={() => setNewOpen(true)}>
@@ -770,7 +770,7 @@ export default function SkillsPage() {
                 const isSkillSelected = selected?.skill === s.name && selected.path === null;
                 return (
                   <div key={s.name}>
-                    {/* skill 根节点 */}
+                    {/* Skill root node */}
                     <div
                       className={cn(
                         "group relative flex cursor-pointer select-none items-center gap-1 rounded px-2 py-1 text-sm",
@@ -814,7 +814,7 @@ export default function SkillsPage() {
                       </span>
                     </div>
 
-                    {/* 展开：递归文件树 */}
+                    {/* Expanded: recursive file tree */}
                     {isOpen && (
                       <>
                         {renderTree(tree, s.name, 0)}
@@ -833,7 +833,7 @@ export default function SkillsPage() {
           </ScrollArea>
         </div>
 
-        {/* ── 右侧面板 ── */}
+        {/* ── Right-hand panel ── */}
         <div className="flex flex-1 flex-col overflow-auto p-4">
           {!selected && (
             <SkillsOverview
@@ -864,7 +864,7 @@ export default function SkillsPage() {
                   lg When overflow, flex-row-reverse collapses to single column: stats appear first due to DOM order,
                   On narrow screens, stack above config (same as previous top-bottom order). */}
               <div className="flex flex-col gap-6 lg:flex-row-reverse lg:items-start">
-                {/* ── 右侧：调用统计 ── */}
+                {/* ── Right: call statistics ── */}
                 <div className="space-y-2 lg:w-80 lg:shrink-0">
                   <Label className="text-xs text-muted-foreground">Call statistics</Label>
                   <div className="grid grid-cols-3 gap-2">
@@ -913,7 +913,7 @@ export default function SkillsPage() {
                   )}
                 </div>
 
-                {/* ── 左侧：关联 MCP + 可见性 ── */}
+                {/* ── Left: linked MCP + visibility ── */}
                 <div className="space-y-5 lg:min-w-0 lg:flex-1">
                   <div className="space-y-2">
                     <Label className="text-xs text-muted-foreground">
@@ -983,7 +983,7 @@ export default function SkillsPage() {
         </div>
       </div>
 
-      {/* ── 删除二次确认 ── */}
+      {/* ── Delete confirmation ── */}
       <AlertDialog open={!!pendingDelete} onOpenChange={(o) => { if (!o) setPendingDelete(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1012,7 +1012,7 @@ export default function SkillsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ── 新建 Skill 对话框 ── */}
+      {/* ── New skill dialogue ── */}
       <Sheet open={newOpen} onOpenChange={setNewOpen}>
         <SheetContent side="right" className="flex w-full flex-col gap-0 data-[side=right]:sm:max-w-xl">
           <SheetHeader className="px-4 pt-4">
@@ -1039,7 +1039,7 @@ export default function SkillsPage() {
               </TabsTrigger>
             </TabsList>
 
-            {/* 基本信息 */}
+            {/* Basic information */}
             <TabsContent value="basic" className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4 pt-4 data-[state=inactive]:hidden">
               <div className="grid gap-1.5">
                 <Label htmlFor="sk-name">Name <span className="text-destructive">*</span></Label>
@@ -1071,7 +1071,7 @@ export default function SkillsPage() {
               </div>
             </TabsContent>
 
-            {/* 关联 MCP */}
+            {/* Linked MCP */}
             <TabsContent value="mcp" className="overflow-y-auto px-4 pb-4 pt-4 data-[state=inactive]:hidden">
               <p className="mb-3 text-xs text-muted-foreground">Reveal and unlock selected MCP tools when loading a Skill.</p>
               {mcpOptions.length === 0 ? (
@@ -1093,7 +1093,7 @@ export default function SkillsPage() {
               )}
             </TabsContent>
 
-            {/* 可见性 */}
+            {/* Visibility */}
             <TabsContent value="visibility" className="overflow-y-auto px-4 pb-4 pt-4 data-[state=inactive]:hidden">
               <p className="mb-3 text-xs text-muted-foreground">Visible after creating the selected Agent Skill.</p>
               {agents.length === 0 ? (

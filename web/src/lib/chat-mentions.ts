@@ -1,7 +1,7 @@
 export const mentionKinds = [
   { kind: "finding", label: "Vulnerability", alias: "finding" },
   { kind: "asset", label: "Asset", alias: "asset" },
-  { kind: "company", label: "Enterprise", alias: "company" },
+  { kind: "company", label: "Company", alias: "company" },
   { kind: "endpoint", label: "API", alias: "api" },
   { kind: "ip", label: "IP", alias: "ip" },
   { kind: "app", label: "Application", alias: "app" },
@@ -45,14 +45,14 @@ export function mentionSearch(query: string) {
 export function mentionToken(item: ChatMention) {
   const kind = mentionKinds.find((entry) => entry.kind === item.kind)?.label ?? "Asset";
   const label = item.label
-    .replace(/[[\]]/g, (char) => (char === "[" ? "（" : "）"))
+    .replace(/[[\]]/g, (char) => (char === "[" ? "(" : ")"))
     .replace(/\s+/g, " ")
     .slice(0, 100);
   return `@[${kind}#${item.id} ${label}]`;
 }
 
 export function selectedMentions(value: string) {
-  return [...value.matchAll(/@\[(Vulnerability|Asset|Enterprise|API|IP|Application|Domain|Subdomain|Service)#([0-9]+)(?: ([^\]\r\n]*))?\]/g)].map(
+  return [...value.matchAll(/@\[(Vulnerability|Asset|Company|API|IP|Application|Domain|Subdomain|Service)#([0-9]+)(?: ([^\]\r\n]*))?\]/g)].map(
     (match) => ({
       token: match[0],
       label: `${match[1]} #${match[2]}${match[3] ? ` · ${match[3]}` : ""}`,
