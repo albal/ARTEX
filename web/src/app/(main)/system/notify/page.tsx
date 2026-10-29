@@ -32,10 +32,10 @@ import { ConfigField, FilterSummary } from "./_components/channel-form";
 import { DeliveryList } from "./_components/delivery-list";
 import { formatBacklog, StatTile } from "./_components/stat-tile";
 
-// 本页只负责编排：加载数据、维护表单状态、调用接口。
-// 字段定义与解析在 _components/channel-fields.ts，控件与过滤摘要在
-// _components/channel-form.tsx，投递记录在 _components/delivery-list.tsx——
-// 拆开是因为它们各自能被单独读懂，而挤在一个文件里时这个页面接近 1100 行。
+// This page only orchestrates: loading data, maintaining form state and calling the API.
+// Field definitions and parsing live in _components/channel-fields.ts, controls and the filter summary in
+// _components/channel-form.tsx, and delivery records in _components/delivery-list.tsx;
+// they were split out because each can be understood on its own, and crammed into one file this page was close to 1,100 lines.
 export default function NotifyPage() {
   const [meta, setMeta] = React.useState<NotificationMeta | null>(null);
   const [channels, setChannels] = React.useState<NotificationChannel[]>([]);
@@ -60,8 +60,8 @@ export default function NotifyPage() {
         setDigestMin(m.digest_interval_min);
       })
       .catch((e) => toast.error("Failed to read push configuration: " + (e as Error).message));
-    // 渠道列表加载失败要报出来：静默失败会显示成「一个渠道都没有」，
-    // 用户会以为配置丢了，比直接报错更让人慌。
+    // A failure to load the channel list must be reported: failing silently would show as "no channels at all",
+    // and users would think their configuration had been lost, which is more alarming than an outright error.
     api
       .notifyChannels()
       .then(setChannels)
@@ -86,7 +86,7 @@ export default function NotifyPage() {
 
   function openEdit(ch: NotificationChannel) {
     setEditing(ch);
-    // filter 在后端是 Go 结构体，永远序列化成对象（不会是 null），所以不需要兜底。
+    // filter is a Go struct on the backend and always serialises to an object (never null), so no fallback is needed.
     const f = ch.filter;
     setForm({
       name: ch.name,
@@ -94,8 +94,8 @@ export default function NotifyPage() {
       mode: ch.mode,
       enabled: ch.enabled,
       ratePerMin: String(ch.rate_per_min),
-      // 后端回显的 config 里凭据是掩码值；原样放进表单，提交时原样送回，
-      // 后端据此保留库中原值。
+      // Credentials in the config echoed by the backend are mask values; they go into the form as is and are sent back unchanged on submit,
+      // which tells the backend to keep the original values in the database.
       config: { ...ch.config },
       minSeverity: f.min_severity ?? "",
       includeText: (f.vulnclass_include ?? []).join("\n"),
@@ -107,17 +107,17 @@ export default function NotifyPage() {
     setOpen(true);
   }
 
-  // buildConfig 把表单状态转成渠道 config。
+  // buildConfig turns the form state into a channel config.
   //
-  // 唯一的规则，两类值：
-  //   - 掩码值（"__masked__..."）原样送回 → 后端解读为「这个字段没改，保留库中原值」
-  //   - 其余一律按用户输入提交，空串即「清空该字段」
+  // There is a single rule, with two kinds of value:
+  //   - mask values ("__masked__...") are sent back unchanged → the backend reads this as "this field was not changed; keep the stored value"
+  //   - everything else is submitted as the user entered it, and an empty string means "clear this field"
   //
-  // 之所以不特殊照顾凭据字段（比如「凭据留空就跳过」），是因为那会让用户**无法清除**
-  // 一个设错的密钥——界面上没有任何操作能表达「我要把它删掉」。现在的规则下，
-  // 清空输入框就等于清空该字段，语义唯一且用户可控。
-  // 掩码值不会出现在输入框里（见 ConfigField），所以「框里有字」永远等于
-  // 「用户主动填的」。
+  // Credential fields get no special treatment (such as "skip if left blank"), because that would leave users **unable to clear**
+  // a wrongly set key: there would be no action in the interface that says "I want to delete it". Under the current rule,
+  // clearing the input box clears the field, so the meaning is unambiguous and under the user's control.
+  // Mask values never appear in the input box (see ConfigField), so "there is text in the box" always means
+  // "the user typed it".
   function buildConfig(): Record<string, unknown> {
     const defs = CHANNEL_FIELDS[form.kind] ?? [];
     const out: Record<string, unknown> = {};
@@ -142,7 +142,7 @@ export default function NotifyPage() {
       }
       if (d.kind === "list") {
         out[d.key] = String(raw ?? "")
-          .split(/[\s,，]+/)
+          .split(/[\s,]+/)
           .map((s) => s.trim())
           .filter(Boolean);
         continue;
@@ -203,7 +203,7 @@ export default function NotifyPage() {
       const r = await api.notifyTestChannel(editing.id);
       toast.success(`Test message sent (${r.latency_ms} ms), please confirm in the group`);
     } catch (e) {
-      // 后端把渠道返回的原始错误如实回传，这是排查配置的唯一线索，原样展示。
+      // The backend passes back the channel's raw error faithfully; it is the only clue for diagnosing the configuration, so show it as is.
       toast.error("Test failed: " + (e as Error).message, { duration: 12000 });
     } finally {
       setTesting(false);
@@ -273,8 +273,8 @@ export default function NotifyPage() {
           </p>
         </div>
         {meta && (
-          // 用 div 而不是 label：Switch 自带 aria-label，外面再套一层 label
-          // 既关联不到任何原生控件，又会让点击文字看起来应该能切换。
+          // A div rather than a label: Switch has its own aria-label, and wrapping it in a label
+          // would associate with no native control while making a click on the text look as if it should toggle.
           <div className="flex shrink-0 items-center gap-2 text-sm">
             <span className="text-muted-foreground">Master Switch</span>
             <Switch
@@ -296,7 +296,7 @@ export default function NotifyPage() {
           <StatTile
             label="Longest backlog"
             value={formatBacklog(meta.stats.backlog_age_ms)}
-            // 积压年龄比积压条数有用得多：积压 3 条可以是从 3 秒到 3 小时。
+            // The age of the backlog is far more useful than its size: a backlog of 3 could be anything from 3 seconds to 3 hours old.
             hint={meta.stats.backlog_age_ms > 5 * 60_000 ? "Push may be stuck" : undefined}
             tone={meta.stats.backlog_age_ms > 5 * 60_000 ? "red" : undefined}
           />
@@ -383,8 +383,8 @@ export default function NotifyPage() {
                         aria-label="Delete"
                         onClick={(e) => {
                           e.stopPropagation();
-                          // void 显式丢弃 Promise：removeChannel 自己 catch 并 toast，
-                          // 这里不需要 await（onClick 不是 async）。
+                          // void explicitly discards the Promise: removeChannel catches and toasts itself,
+                          // so there is no need to await here (onClick is not async).
                           void removeChannel(ch);
                         }}
                       >
@@ -428,7 +428,7 @@ export default function NotifyPage() {
                 <Select
                   value={form.kind}
                   onValueChange={(v) => {
-                    // 换类型等于换一套凭据字段，不能把旧配置合并进来。
+                    // Changing type means a different set of credential fields, so the old config must not be merged in.
                     setF({ kind: v, config: {} });
                   }}
                   disabled={!!editing}

@@ -163,25 +163,25 @@ function mergeBySeq(current: Activity[], incoming: Activity[]): Activity[] {
 }
 
 // statusIcon maps a session status to its icon. Worker terminal states are
-// distinct & color-coded: 完成(绿勾圈) / 取消停止(琥珀斜杠圈) / 出错(红叉圈) /
-// 步数耗尽(紫). running=蓝色转圈, pending(待领取)=灰时钟.
+// distinct & colour-coded: done (green tick circle) / cancelled-stopped (amber slashed circle) / error (red cross circle) /
+// turns exhausted (purple). running = blue spinner, pending (awaiting claim) = grey clock.
 function statusIcon(status: SessionStatus) {
   switch (status) {
-    case "running": // 执行中
+    case "running": // running
       return <Loader2Icon className="size-3.5 animate-spin text-blue-500" />;
     case "paused":
       return <PauseIcon className="size-3.5 text-amber-500" />;
-    case "pending": // 待领取(open intent)
+    case "pending": // awaiting claim (open intent)
       return <ClockIcon className="size-3.5 text-muted-foreground" />;
-    case "done": // 完成
+    case "done": // done
       return <CircleCheckIcon className="size-3.5 text-emerald-500" />;
-    case "stopped": // 取消/停止(被 planner 终止)
+    case "stopped": // cancelled/stopped (terminated by the planner)
       return <CircleSlashIcon className="size-3.5 text-amber-500" />;
-    case "blocked": // 出错
+    case "blocked": // error
       return <CircleXIcon className="size-3.5 text-red-500" />;
-    case "exhausted": // 步数耗尽(撞 max_turns)
+    case "exhausted": // turns exhausted (hit max_turns)
       return <ZapOffIcon className="size-3.5 text-violet-500" />;
-    case "deleted": // 用户假删除
+    case "deleted": // soft-deleted by the user
       return <CircleSlashIcon className="size-3.5 text-muted-foreground" />;
   }
 }
@@ -244,7 +244,7 @@ const roleMeta = {
 // dedicated backend "sessions" endpoint — it is a fixed UI affordance whose
 // transcript is the main-agent activity stream (worker="mainagent") for the task.
 // A main-agent session is one resettable conversation segment. Segment 0 is the
-// original session; "新建会话" creates further segments (seq 1,2,…) so the agent
+// original session; "New session" creates further segments (seq 1,2,…) so the agent
 // starts on a clean transcript while the task's graph/assets/goal stay shared. Each
 // segment is a switchable UI session; only the current (highest) one is writable.
 const mainSessionId = (seg: number) => `s-main-${seg}`;
@@ -309,9 +309,9 @@ function intentStatus(state: string): SessionStatus {
       return "stopped";
     case "paused":
       return "paused";
-    case "open": // 待领取，区别于执行中
+    case "open": // awaiting claim, distinct from running
       return "pending";
-    case "deleted": // 用户假删除
+    case "deleted": // soft-deleted by the user
       return "deleted";
     default: // running
       return "running";
@@ -369,7 +369,7 @@ function SessionItem({
     s.role === "worker" &&
     !s.inherited &&
     !deleted &&
-    // pending = 待领(open)意图;连同运行中/已暂停都允许删除。
+    // pending = an intent awaiting claim (open); deletion is allowed for these as well as running/paused ones.
     (s.status === "running" || s.status === "paused" || s.status === "pending");
   return (
     <div
@@ -515,9 +515,9 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   const [currentSeg, setCurrentSeg] = React.useState(0);
   const [creatingMain, setCreatingMain] = React.useState(false);
   const [confirmNewMain, setConfirmNewMain] = React.useState(false);
-  // 手机端（<lg）会话列表默认折叠：屏幕高度本就紧张，列表若固定占掉 10~15rem，
-  // 下方的会话记录会被挤到只剩标题与输入框。折叠后记录区拿到几乎全部高度，
-  // 点标题栏可展开选会话，选完自动收起。桌面端不受影响（lg 起始终展开）。
+  // On mobile (<lg) the session list is collapsed by default: screen height is already tight, and if the list took a fixed 10–15rem
+  // the session transcript below would be squeezed down to just the title and the input box. Collapsed, the transcript gets almost the full height;
+  // tapping the title bar expands it to pick a session and it collapses again after picking. Desktop is unaffected (always expanded from lg up).
   const [listOpen, setListOpen] = React.useState(false);
   // Per-session lazily-loaded caches, keyed by session_key (main | plan | intent:<id>).
   const [store, setStore] = React.useState<SessionStore>({});
@@ -536,12 +536,12 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   const [controllingIntent, setControllingIntent] = React.useState<string | null>(null);
   const [cancelIntent, setCancelIntent] = React.useState<Session | null>(null);
   const [cancelReason, setCancelReason] = React.useState("");
-  // 删除模式:soft=假删除(默认,置 deleted + 记原因,保留数据)| hard=真删除(级联移除独占子孙)。
+  // Delete mode: soft = soft delete (default; set to deleted + record the reason, keeping the data) | hard = real delete (cascades to remove exclusively owned descendants).
   const [deleteMode, setDeleteMode] = React.useState<"soft" | "hard">("soft");
   const [workerMessage, setWorkerMessage] = React.useState("");
   const [workerMessageRequestId, setWorkerMessageRequestId] = React.useState("");
   const [workerMessageSending, setWorkerMessageSending] = React.useState(false);
-  // 方式1 文件上传:选好的附件(已落到任务工作目录 uploads/),随下条消息一起发。
+  // Method 1, file upload: the selected attachments (already saved to uploads/ in the task working directory) are sent with the next message.
   const [attachments, setAttachments] = React.useState<ChatAttachment[]>([]);
   const [uploading, setUploading] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -609,14 +609,14 @@ export function SessionsTab({ taskId }: { taskId: string }) {
           patchIntentState(session.intent_id, "open");
           toast.success(`Worker #${session.intent_id} recovered, awaiting reassignment`);
         } else if (mode === "hard") {
-          // 真删除:意图及独占下游已物理移除,从列表剔除该行。
+          // Hard delete: the intent and its exclusively owned downstream have been physically removed, so drop the row from the list.
           patchIntentState(session.intent_id);
           const d = res.deleted;
           const extra = d ? `(including ${d.intents} intents / ${d.facts} facts / ${d.findings} findings)` : "";
           toast.success(`Worker #${session.intent_id} And its exclusive downstream have been fully deleted${extra}`);
           setCancelReason("");
         } else {
-          // 假删除:意图置 deleted、记录删除原因,保留节点与产出。
+          // Soft delete: the intent is set to deleted with the deletion reason recorded, keeping the node and its output.
           patchIntentState(session.intent_id, "deleted");
           toast.success(`Worker #${session.intent_id} Deleted (reason recorded, planner will replan accordingly)`);
           setCancelReason("");
@@ -1156,7 +1156,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
     for (const node of allIntents) {
       let title = `Intent ${node.id}`;
       let parsedPayload: unknown = node.payload;
-      // 假删除:意图 state='deleted',删除原因在独立字段 delete_reason 上。
+      // Soft delete: the intent has state='deleted', and the deletion reason is in the separate delete_reason field.
       const deleted = node.state === "deleted";
       const deleteReason = node.delete_reason ?? "";
       if (node.payload) {
@@ -1280,8 +1280,8 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   const activeSettled =
     !!activeLast && (activeLast.kind === "result" || (activeLast.kind === "text" && activeLast.is_error));
   const mainBusy = isMain && (sending || (!activeSettled && (mainChatRunning ?? recentLive(activeKey))));
-  // 折叠态（手机端）标题栏要替代整张列表：显示当前会话名 + 其它会话的未读合计，
-  // 否则收起后既不知道自己在看哪个会话，也看不到别处有新消息。
+  // In the collapsed state (mobile) the title bar stands in for the whole list: it shows the current session name + the unread total of the other sessions,
+  // otherwise once collapsed you would neither know which session you are viewing nor see new messages elsewhere.
   const activeDisplayTitle = (active.role === "worker" ? sessionMeta.get(active.id)?.title : "") || active.title;
   const hiddenUnread = React.useMemo(
     () => Object.entries(store).reduce((sum, [key, s]) => (key === activeKey ? sum : sum + s.unread), 0),
@@ -1547,7 +1547,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   }
 
   const mainLoaded = !!store[currentMainKey]?.loaded;
-  // 发送键位由系统设置决定（localStorage），默认 Enter 发送。
+  // The send key is set by system settings (localStorage); Enter sends by default.
   const sendMode = useChatSendMode();
   // What the transcript pane should show for the active session.
   const showLoader = !activeState || (activeState.loading && !activeState.loaded);
@@ -1693,7 +1693,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                           onClick={() => {
                             approvalFocus.close();
                             setActiveId(s.id);
-                            setListOpen(false); // 手机端选完即收起，把高度还给会话记录
+                            setListOpen(false); // on mobile, collapse after picking to give the height back to the transcript
                             setWorkerMessage("");
                             setWorkerMessageRequestId("");
                           }}
@@ -1796,7 +1796,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
               <div className="ml-auto flex min-w-0 max-w-full items-center justify-end gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:w-full max-sm:flex-wrap">
                 {tokenTotal.any && (
                   <Tooltip>
-                    {/* 手机端用短标签（入/缓/出）：长标签会把这一行撑成两行，进一步压缩记录区。 */}
+                    {/* Mobile uses short labels (in/cache/out): long labels would wrap this line onto two rows and squeeze the transcript further. */}
                     <TooltipTrigger asChild>
                       <span className="inline-flex min-w-0 items-center">
                         <TokenMetrics

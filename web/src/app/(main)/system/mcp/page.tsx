@@ -156,7 +156,7 @@ export default function MCPPage() {
               url: form.url.trim(),
               command: "",
               args: [] as string[],
-              env: parseEnv(form.env), // 远程模式下 env 即请求头
+              env: parseEnv(form.env), // in remote mode env holds the request headers
               insecure: form.insecure,
             }
           : {

@@ -137,7 +137,7 @@ func TestCompanyScopeHTTPErrorClassificationAndBounds(t *testing.T) {
 		body, err := json.Marshal(map[string]any{
 			"name": "Oversized Scope",
 			"scope": []map[string]string{{
-				"kind": "keyword", "value": strings.Repeat("界", db.MaxCompanyScopeRawRunes+1),
+				"kind": "keyword", "value": strings.Repeat("x", db.MaxCompanyScopeRawRunes+1),
 			}},
 		})
 		if err != nil {

@@ -27,11 +27,11 @@ export function UpdateBadge() {
     api
       .checkUpdate()
       .then((r) => {
-        // has_update 已经包含了"版本号可比较"的判断，开发构建不会亮这个提示。
+        // has_update already includes the "version numbers are comparable" check, so development builds never show this prompt.
         if (alive && r.has_update && r.latest) setLatest(r.latest.replace(/^v(?=\d)/, ""));
       })
       .catch(() => {
-        // 静默：没网 / GitHub 限流都不该在顶栏弹错误。
+        // Silent: being offline / GitHub rate limiting should never pop up an error in the top bar.
       });
     return () => {
       alive = false;
@@ -46,7 +46,7 @@ export function UpdateBadge() {
       title={`New version found ${latest}; click to update`}
       className="inline-flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-1 font-medium text-primary-foreground text-xs transition-opacity hover:opacity-90"
     >
-      {/* 呼吸点：顶栏元素很多，纯文字容易被忽略，动效让它一眼可见。 */}
+      {/* Pulsing dot: the top bar is busy and plain text is easy to miss; the animation makes it visible at a glance. */}
       <span className="relative flex size-1.5">
         <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary-foreground opacity-75" />
         <span className="relative inline-flex size-1.5 rounded-full bg-primary-foreground" />

@@ -60,7 +60,7 @@ export default function CommandsPage() {
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
 
-  // 各工具调用次数。弹窗打开时才拉取（多一次聚合查询，不必每次翻页都付）。
+  // Call count per tool. Only fetched when the dialog opens (one extra aggregate query, not worth paying on every page turn).
   const [statsOpen, setStatsOpen] = React.useState(false);
   const [stats, setStats] = React.useState<ToolStat[]>([]);
   const [statsLoading, setStatsLoading] = React.useState(false);
@@ -102,7 +102,7 @@ export default function CommandsPage() {
     };
   }, [page, size, queryQ, taskFilter]);
 
-  // 统计跟随筛选条件走，和表格描述的是同一批记录（但不分页）。
+  // Stats follow the filters and describe the same records as the table (but unpaginated).
   React.useEffect(() => {
     if (!statsOpen) return;
     let alive = true;
@@ -272,7 +272,7 @@ export default function CommandsPage() {
         </Card>
       </div>
 
-      {/* 工具调用统计：与表格同一批记录（同筛选、不分页） */}
+      {/* Tool call stats: the same records as the table (same filters, unpaginated) */}
       <Dialog open={statsOpen} onOpenChange={setStatsOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>

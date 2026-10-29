@@ -76,7 +76,7 @@ function tryFormatJSON(s: string): string {
   }
 }
 
-// 复制当前框内文本的小按钮。复制成功后短暂显示对勾。text 为空/仅占位符时禁用。
+// Small button that copies the text in the current box. Briefly shows a tick after a successful copy. Disabled when text is empty/only a placeholder.
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = React.useState(false);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -88,14 +88,14 @@ function CopyButton({ text }: { text: string }) {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      // navigator.clipboard 在非安全上下文(如 http 局域网)不可用，回退到 execCommand。
+      // navigator.clipboard is unavailable in insecure contexts (e.g. http on a LAN), so fall back to execCommand.
       const ta = document.createElement("textarea");
       ta.value = text;
       ta.style.position = "fixed";
       ta.style.opacity = "0";
       document.body.appendChild(ta);
       ta.select();
-      try { document.execCommand("copy"); } catch { /* 忽略：不支持则静默 */ }
+      try { document.execCommand("copy"); } catch { /* ignore: stay silent if unsupported */ }
       document.body.removeChild(ta);
     }
     setCopied(true);
@@ -139,15 +139,15 @@ export default function LLMRecordsPage() {
   const [selected, setSelected] = React.useState<LLMRecordItem | null>(null);
   const [detail, setDetail] = React.useState<LLMRecordDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
-  // 归一化视图 / HTTP 原文视图。原文是排查 provider 侧问题的唯一依据：归一化视图
-  // 不含工具 schema，响应里也没有 tool_use 块。
+  // Normalised view / raw HTTP view. The raw view is the only basis for diagnosing provider-side problems: the normalised view
+  // has no tool schema, and there are no tool_use blocks in the response.
   const [rawView, setRawView] = React.useState(false);
 
   const hasRaw = !!(detail?.raw_request || detail?.raw_response);
-  // 开关保持用户选择，但切到一条无原文的旧记录时自动落回解析视图，而不是显示空白。
+  // The toggle keeps the user's choice, but switching to an older record without raw data falls back to the parsed view automatically rather than showing a blank.
   const showRaw = rawView && hasRaw;
-  // 原文请求体是 JSON，pretty-print 只改排版不改语义，便于阅读；原文响应是 SSE
-  // 帧，tryFormatJSON 解析失败会原样返回，故两边共用一个函数即可。
+  // The raw request body is JSON, and pretty-printing changes only the layout, not the meaning, so it is easier to read; the raw response is SSE
+  // frames, and tryFormatJSON returns its input unchanged when parsing fails, so both sides can share one function.
   const reqText = showRaw
     ? detail?.raw_request && tryFormatJSON(detail.raw_request)
     : detail?.request_body && tryFormatJSON(detail.request_body);
@@ -295,7 +295,7 @@ export default function LLMRecordsPage() {
               tasks.map((t) => (
                 <SelectItem key={t.task_id} value={t.task_id}>
                   <span className="font-mono">#{t.task_id}</span>
-                  <span className="ml-2 text-muted-foreground">（{t.count}）</span>
+                  <span className="ml-2 text-muted-foreground">({t.count})</span>
                 </SelectItem>
               ))
             )}

@@ -9,33 +9,33 @@ import (
 	"time"
 )
 
-// 本文件是投递任务的领取与状态流转。
+// This file is delivery task claiming and status transitions.
 //
-// 领取用「租约」而非长事务：把行置为 sending 并把 next_attempt_at 推到未来作为
-// 租约到期时间，提交事务后再去做网络投递。这样投递期间不持有数据库锁——
-// 网络请求可能耗时数秒（客户端超时 15 秒），占着行锁不放会拖垮同库的其它写操作。
+// Claiming uses a "lease" rather than a long transaction: the row is set to sending and next_attempt_at pushed into the future as
+// the lease expiry, then the transaction commits before the network delivery is done. This way no database lock is held during delivery —
+// a network request can take several seconds (the client times out at 15), and holding a row lock would drag down other writes on the same database.
 //
-// 代价是进程若在投递途中崩溃，行会停在 sending。这是**可自愈**的：租约到期后
-// next_attempt_at 落入过去，下一轮领取会把同一行重新捞起来（见领取条件里的
-// state IN ('pending','sending')）。重试计数在领取时就已 +1，所以崩溃不会造成
-// 无限重试——MaxNotifyAttempts 次机会用完后落入 failed 等人工处理。
+// The cost is that if the process crashes mid-delivery the row is left in sending. This is **self-healing**: once the lease expires
+// next_attempt_at is in the past, and the next claim round picks the same row up again (see state IN ('pending','sending')
+// in the claim condition). The retry count is already +1 at claim time, so a crash does not cause
+// infinite retries — after MaxNotifyAttempts chances it falls into failed for manual handling.
 
-// MaxNotifyAttempts 是一条投递的最大尝试次数（含首次）。
-// 定义在这里而非投递引擎里：它是状态机自身的策略，引擎只是执行者。
+// MaxNotifyAttempts is the maximum number of attempts for one delivery (including the first).
+// Defined here rather than in the delivery engine: it is the state machine's own policy, and the engine is only the executor.
 const MaxNotifyAttempts = 3
 
-// MaxDigestBatchSize 是单个汇总批次一次最多合并多少条投递。
+// MaxDigestBatchSize is the most deliveries one digest batch merges at once.
 //
-// 存在的理由是资源：一个汇总周期内如果扫出几万个漏洞（完全可能——一次全量扫描
-// 就能做到），不设上界的话领取会把全部行读进内存、渲染成一条超长消息，
-// 然后被渠道的长度上限截掉大半——既浪费内存，又**静默丢失**被截掉的那些漏洞。
-// 设上界后，超出的部分留在库里成为下一个批次，下个周期自然发出去，不会丢。
+// The reason it exists is resource: if a digest window finds tens of thousands of vulnerabilities (entirely possible — one full scan
+// can do it), with no upper bound a claim would read all the rows into memory, render one extremely long message,
+// and then have most of it cut off by the channel's length limit — wasting memory and **silently losing** the cut vulnerabilities.
+// With an upper bound, the excess stays in the database as the next batch, sent out naturally next window, and is not lost.
 //
-// 取 500 的依据：它是渲染成消息后在企微 4096 字节上限内还"有内容可读"的量级；
-// 再大也只是让截断发生在更靠后的位置而已。
+// The basis for 500: it is the magnitude that, rendered into a message, still has "readable content" within WeCom's 4096-byte limit;
+// any larger just makes the truncation happen further along.
 const MaxDigestBatchSize = 500
 
-// NotificationDelivery 是一条投递任务，含渲染所需的渠道配置与事件快照。
+// NotificationDelivery is one delivery task, carrying the channel config and event snapshot needed for rendering.
 type NotificationDelivery struct {
 	ID            int64           `json:"id"`
 	EventID       int64           `json:"event_id"`
@@ -48,12 +48,12 @@ type NotificationDelivery struct {
 	CreatedAt     time.Time       `json:"created_at"`
 	SentAt        *time.Time      `json:"sent_at,omitempty"`
 	Snapshot      json.RawMessage `json:"snapshot,omitempty"`
-	// 联合加载的渲染上下文，不进 JSON（由 server 层组装 DTO）。
+	// the joint-loaded rendering context, not in the JSON (the server layer assembles the DTO).
 	Channel *NotificationChannel `json:"-"`
-	// FindingID/EventKind 从事件带出，供历史列表直接跳转漏洞详情。
+	// FindingID/EventKind are carried over from the event, so the history list can jump straight to the vulnerability detail.
 	FindingID int64  `json:"finding_id,string"`
 	EventKind string `json:"event_kind"`
-	// ChannelName/ChannelKind 是列表展示用的冗余字段，省掉前端二次查询。
+	// ChannelName/ChannelKind are redundant fields for the list display, saving the frontend a second query.
 	ChannelName string `json:"channel_name"`
 	ChannelKind string `json:"channel_kind"`
 }
@@ -61,8 +61,8 @@ type NotificationDelivery struct {
 const notificationDeliveryCols = `d.id, d.event_id, d.channel_id, d.state, d.attempts, d.next_attempt_at,
        d.last_error, d.batch_id, d.created_at, d.sent_at`
 
-// joinedDeliveryQuery 是投递行的统一读取形状：投递 + 事件快照 + 渠道配置。
-// 渲染一条消息三者缺一不可，分开查会写出三次往返。
+// joinedDeliveryQuery is the unified read shape for a delivery row: delivery + event snapshot + channel config.
+// All three are indispensable for rendering a message; querying them separately would mean three round-trips.
 const joinedDeliveryQuery = `SELECT ` + notificationDeliveryCols + `,
        e.snapshot, e.kind, e.finding_id,
        c.id, c.name, c.kind, c.enabled, c.config, c.mode, c.filter, c.rate_per_min
@@ -103,24 +103,24 @@ func scanNotificationDelivery(sc interface{ Scan(...any) error }) (*Notification
 	return &dl, nil
 }
 
-// claimQuery 描述一次领取：先按 sel 选出候选并加锁，再把它们置为 sending 并
-// 延长租约。sel 里的 lease 位置由调用方用 $n 占位并自行传参。
+// claimQuery describes one claim: first select the candidates with sel and lock them, then set them to sending and
+// extend the lease. The lease position in sel is placed by the caller with $n and passed in by them.
 type claimQuery struct {
 	sql  string
 	args []any
 }
 
-// ClaimRealtimeDeliveries 领取某渠道一批到期的实时投递，最多 limit 条。
+// ClaimRealtimeDeliveries claims a batch of a channel's due realtime deliveries, at most limit.
 //
-// 刻意按**单个渠道**领取而不是「全局领一批再挑着发」：限流闸在投递引擎里按渠道
-// 维护，只有先知道这个渠道这一轮还能发几条、再去领同样多的行，限流才不会消耗
-// 重试次数。若反过来先领后弃，被限流挡下的行已经被计过一次 attempts，
-// 3 次预算会被纯粹的等待耗光，最后落进 failed。
+// Deliberately claimed per **single channel** rather than "claim a global batch and pick ones to send": the rate limiter is maintained per channel in the delivery engine,
+// and only by first knowing how many this channel can still send this round and then claiming that many rows does rate limiting not consume
+// retry attempts. If instead you claim first and drop later, a row held off by rate limiting has already had its attempts counted once,
+// and the 3-attempt budget would be burned by pure waiting, finally landing in failed.
 //
-// 条件含「租约已过期的 sending」——那是崩溃自愈的落点。lease 必须显著大于单次
-// 投递的最坏耗时（渠道 HTTP 客户端超时 15 秒），否则同一行会被两个 dispatcher
-// 同时投递。同时挡掉已停用渠道：停用操作已把存量投递标记为 skipped，
-// 这里再拦一道，避免停用与领取并发时的漏网。
+// The condition includes "sending whose lease has expired" — that is the landing point for crash self-healing. The lease must be significantly larger than a single
+// delivery's worst-case duration (the channel HTTP client times out at 15s), otherwise the same row would be delivered by two dispatchers
+// at once. It also blocks disabled channels: the disable operation has marked existing deliveries as skipped,
+// and this is a second guard against leaks when disabling and claiming run concurrently.
 func (d *DB) ClaimRealtimeDeliveries(ctx context.Context, channelID int64, limit int, lease time.Duration) ([]*NotificationDelivery, error) {
 	if limit <= 0 {
 		return nil, nil
@@ -137,15 +137,15 @@ LIMIT $5`,
 	}, nil)
 }
 
-// DigestBatchDue 报告该渠道是否已攒够一个到期批次：存在待发投递，且**最老的那条**
-// 年龄已达到汇总周期。
+// DigestBatchDue reports whether the channel has accumulated a due batch: there are not-yet-sent deliveries, and **the oldest one's**
+// age has reached the digest window.
 //
-// 判定依据是最老投递的年龄而非墙上时钟：这样刚建好的渠道不会因为对齐到整点而
-// 立刻吐出一条只有一条的「汇总」，积压很久的批次也不会再白等一轮。
+// The basis is the oldest delivery's age rather than the wall clock: this way a just-created channel does not, by aligning to the hour,
+// immediately emit a one-item "digest", and a long-backlogged batch does not wait another round for nothing.
 //
-// 与 ClaimDigestBatch 分开是因为语义不同：本函数只回答「该不该发」，
-// 而领取要拿走该渠道**全部**待发行（包括尚未满年龄的那些）——否则一个周期
-// 会被拆成多条消息，汇总就失去意义了。
+// It is separate from ClaimDigestBatch because the semantics differ: this function only answers "should it send",
+// while claiming takes the channel's **entire** not-yet-sent set (including ones not yet old enough) — otherwise one window
+// would be split into several messages and the digest would lose its point.
 func (d *DB) DigestBatchDue(ctx context.Context, channelID int64, minAge time.Duration) (bool, error) {
 	var due bool
 	err := d.QueryRowContext(ctx, `SELECT EXISTS (
@@ -158,28 +158,28 @@ func (d *DB) DigestBatchDue(ctx context.Context, channelID int64, minAge time.Du
 	return due, err
 }
 
-// ClaimDigestBatch 领取某渠道当前到期的待发投递，作为一个汇总批次，
-// 单批最多 MaxDigestBatchSize 条。
+// ClaimDigestBatch claims the channel's currently due not-yet-sent deliveries as one digest batch,
+// at most MaxDigestBatchSize per batch.
 //
-// 同批次的所有投递共享 batch_id，用集合里的最小 id 作批次号（稳定、可读、
-// 无需额外序列）。重试时用 COALESCE 保留原批次号，使「这批 N 条是一起发的」
-// 在多次重试后依然成立。
+// All deliveries in a batch share a batch_id, using the smallest id in the set as the batch number (stable, readable,
+// needing no extra sequence). On retry, COALESCE keeps the original batch number, so "these N were sent together"
+// still holds after several retries.
 //
-// 按 id 升序取前 N 条而非随机取：最早产生的投递最先发出去，积压时不会出现
-// 「新漏洞先发、老漏洞永远排在后面」的饥饿。
+// The first N are taken by id ascending rather than at random: the earliest-produced deliveries are sent first, so a backlog does not cause
+// "new vulnerabilities sent first, old ones forever queued behind" starvation.
 func (d *DB) ClaimDigestBatch(ctx context.Context, channelID int64, limit int, lease time.Duration) ([]*NotificationDelivery, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
-	// limit 是**内存上界**，调用方传 MaxDigestBatchSize；这里再夹一道，
-	// 防止调用方传进一个更大的值。
+	// limit is the **memory upper bound**, and the caller passes MaxDigestBatchSize; it is clamped again here,
+	// to guard against the caller passing a larger value.
 	//
-	// 刻意不接受「限流额度」充当批次大小：限流的单位是消息条数——一个批次只发
-	// 一条消息、消耗一个令牌，由 server 层的 takeTokens 扣除——与「一批装几条
-	// 漏洞」是两个不同的量纲。曾经为了让 rate_per_min 对 digest 生效而把每轮
-	// 请求预算传进来当批次大小，结果 rate=20/min 的渠道每批只装 1 条漏洞，
-	// digest 退化成带汇总文案的实时推送。要改限流请改 takeTokens 的 want，
-	// 不要动这里。
+	// It deliberately does not accept a "rate-limit quota" as the batch size: the unit of rate limiting is the number of messages — one batch sends
+	// one message and consumes one token, deducted by the server layer's takeTokens — a different dimension from "how many
+	// vulnerabilities a batch holds". It was once, to make rate_per_min apply to the digest, given the per-round
+	// request budget as the batch size, and a rate=20/min channel then held only 1 vulnerability per batch, and the
+	// digest degraded into a realtime notification with a digest wrapper. To change rate limiting, change takeTokens' want,
+	// not here.
 	if limit > MaxDigestBatchSize {
 		limit = MaxDigestBatchSize
 	}
@@ -206,14 +206,14 @@ WHERE id IN (`+ph+`)`, append([]any{batchID}, idArgs...)...)
 	return out, err
 }
 
-// claimDeliveries 执行「选取 + 置 sending 延长租约 + 读取完整行」，全在一个事务里。
-// postClaim 是可选的附加步骤（汇总批次用它写入 batch_id）。
+// claimDeliveries performs "select + set sending and extend the lease + read the full rows", all in one transaction.
+// postClaim is an optional extra step (the digest batch uses it to write batch_id).
 func (d *DB) claimDeliveries(ctx context.Context, lease time.Duration, cq claimQuery, postClaim func(*sql.Tx, []int64) error) ([]*NotificationDelivery, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback() //nolint:errcheck // 提交成功后是 no-op
+	defer tx.Rollback() //nolint:errcheck // a no-op after a successful commit
 
 	ids, err := selectForClaim(ctx, tx, cq.sql, cq.args...)
 	if err != nil {
@@ -222,8 +222,8 @@ func (d *DB) claimDeliveries(ctx context.Context, lease time.Duration, cq claimQ
 	if len(ids) == 0 {
 		return nil, tx.Commit()
 	}
-	// 置 sending 并把 next_attempt_at 推到未来：这个未来时刻即租约到期时间，
-	// 「租约未到期」与「未到重试时间」因此共用同一个条件表达，不需要新增列。
+	// set sending and push next_attempt_at into the future: this future moment is the lease expiry,
+	// so "lease not yet expired" and "retry time not yet reached" share the same condition expression, needing no new column.
 	ph, idArgs := placeholders(3, ids)
 	if _, err := tx.ExecContext(ctx, `UPDATE notification_deliveries
 SET state=$1, attempts=attempts+1, next_attempt_at=now()+make_interval(secs => $2)
@@ -278,7 +278,7 @@ func loadDeliveriesTx(ctx context.Context, tx *sql.Tx, ids []int64) ([]*Notifica
 	return out, rows.Err()
 }
 
-// MarkDeliveriesSent 把一批投递标记为已送达。
+// MarkDeliveriesSent marks a batch of deliveries as delivered.
 func (d *DB) MarkDeliveriesSent(ctx context.Context, ids []int64) error {
 	ph, args := placeholders(2, ids)
 	if len(args) == 0 {
@@ -289,10 +289,10 @@ SET state=$1, sent_at=now(), last_error='' WHERE id IN (`+ph+`)`, append([]any{N
 	return err
 }
 
-// RescheduleDeliveries 把一批投递退回 pending 并推后重试时间。
+// RescheduleDeliveries returns a batch of deliveries to pending and pushes the retry time back.
 //
-// 退回 pending 而不是引入新的中间状态，是为了让「还剩几次机会」只由一个地方
-// 表达（MaxNotifyAttempts），避免状态机的分支随重试策略膨胀。
+// Returning to pending rather than introducing a new intermediate state is so "how many chances are left" is expressed in one place only
+// (MaxNotifyAttempts), avoiding the state machine's branches growing with the retry policy.
 func (d *DB) RescheduleDeliveries(ctx context.Context, ids []int64, delay time.Duration, errMsg string) error {
 	ph, args := placeholders(4, ids)
 	if len(args) == 0 {
@@ -305,15 +305,15 @@ WHERE id IN (`+ph+`)`,
 	return err
 }
 
-// DeferDeliveries 把一批投递退回 pending、立即可再领，并**撤销领取时计的那一次尝试**。
+// DeferDeliveries returns a batch of deliveries to pending, immediately re-claimable, and **undoes the one attempt counted at claim time**.
 //
-// 用途只有一个：汇总消息按渠道长度上限分段发送时，没装进本条的条目要留到下一批。
-// 那不是失败，所以不该消耗重试预算——领取时 attempts 已经乐观地 +1 了，
-// 这里必须减回去。否则一个 500 条的积压会按每段 20 条切成 25 段，
-// 尾部条目在第 3 段就被 MaxNotifyAttempts 判成 failed，而它们从未出过任何错。
+// Its only use: when a digest message is sent in segments by the channel's length limit, items not fitted into this one are left for the next batch.
+// That is not a failure, so it should not consume the retry budget — attempts was optimistically +1 at claim time,
+// and must be subtracted back here. Otherwise a backlog of 500, split into 25 segments of 20 each,
+// would have its tail items judged failed by MaxNotifyAttempts at segment 3, though they never erred at all.
 //
-// GREATEST(...,0) 兜住「有人手工重发把 attempts 清零后又走到这里」的情况，
-// 不让计数变成负数。
+// GREATEST(...,0) guards the case of "someone manually resent and zeroed attempts, then reached here",
+// so the count does not go negative.
 func (d *DB) DeferDeliveries(ctx context.Context, ids []int64, reason string) error {
 	ph, args := placeholders(3, ids)
 	if len(args) == 0 {
@@ -326,9 +326,9 @@ WHERE id IN (`+ph+`)`,
 	return err
 }
 
-// FailDeliveries 把一批投递标记为最终失败，等待人工在投递历史里重发。
+// FailDeliveries marks a batch of deliveries as finally failed, awaiting a manual resend in the delivery history.
 func (d *DB) FailDeliveries(ctx context.Context, ids []int64, errMsg string) error {
-	// 占位符从 $3 开始：$1 是 state、$2 是 last_error。
+	// Placeholders start at $3: $1 is state, $2 is last_error.
 	ph, args := placeholders(3, ids)
 	if len(args) == 0 {
 		return nil
@@ -338,9 +338,9 @@ func (d *DB) FailDeliveries(ctx context.Context, ids []int64, errMsg string) err
 	return err
 }
 
-// RetryNotificationDelivery 手动重发一条投递：重置为 pending、清零重试计数、
-// 立即到期。清计数是刻意的——人工点「重发」意味着前几次失败的原因已被处理，
-// 再拿旧计数限制它没有道理。
+// RetryNotificationDelivery manually resends one delivery: reset to pending, zero the retry count,
+// due immediately. Zeroing the count is deliberate — a manual "resend" means the reason for the earlier failures has been dealt with,
+// so limiting it by the old count makes no sense.
 func (d *DB) RetryNotificationDelivery(ctx context.Context, id int64) error {
 	res, err := d.ExecContext(ctx, `UPDATE notification_deliveries
 SET state=$2, attempts=0, next_attempt_at=now(), last_error=''
@@ -349,12 +349,12 @@ WHERE id=$1 AND state IN ($3,$4)`, id, NotifyStatePending, NotifyStateFailed, No
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("投递 %d 不存在或当前状态不允许重发", id)
+		return fmt.Errorf("delivery %d does not exist or its current status does not allow resending", id)
 	}
 	return nil
 }
 
-// NotificationDeliveryFilter 是投递历史的查询条件。
+// NotificationDeliveryFilter is the query condition for the delivery history.
 type NotificationDeliveryFilter struct {
 	ChannelID int64
 	State     string
@@ -382,7 +382,7 @@ func (f NotificationDeliveryFilter) where() (string, []any) {
 	return " WHERE " + strings.Join(conds, " AND "), args
 }
 
-// ListNotificationDeliveries 分页返回投递历史，新的在前。
+// ListNotificationDeliveries returns the delivery history paginated, newest first.
 func (d *DB) ListNotificationDeliveries(ctx context.Context, f NotificationDeliveryFilter, page, pageSize int) ([]*NotificationDelivery, int, error) {
 	if page < 1 {
 		page = 1
@@ -416,14 +416,14 @@ JOIN notification_events e ON e.id = d.event_id`+where, args...).Scan(&total); e
 	return out, total, rows.Err()
 }
 
-// truncateNotifyError 把错误信息截到列可接受的长度。渠道返回的响应体可能很长
-// （通用 Webhook 打到自建服务时尤甚），不截断会让历史列表的载荷膨胀。
+// truncateNotifyError truncates an error message to the length the column accepts. The response body a channel returns can be long
+// (especially a generic webhook hitting a self-hosted service), and not truncating would bloat the history list's payload.
 func truncateNotifyError(msg string) string {
 	const max = 500
 	if len(msg) <= max {
 		return msg
 	}
-	// 按字符边界回退，避免留下半个 UTF-8 字符让前端显示成乱码。
+	// step back on a character boundary, to avoid leaving half a UTF-8 character that the frontend displays as garbage.
 	cut := max
 	for cut > 0 && !isUTF8Start(msg[cut]) {
 		cut--
@@ -433,8 +433,8 @@ func truncateNotifyError(msg string) string {
 
 func isUTF8Start(b byte) bool { return b&0xC0 != 0x80 }
 
-// placeholders 生成从 start 开始的 $n 占位串及对应参数，供 IN (...) 使用。
-// 例如 start=3, ids=[7,8] → "$3,$4", [7,8]。
+// placeholders generates the $n placeholder string from start and the matching arguments, for use in IN (...).
+// For example start=3, ids=[7,8] → "$3,$4", [7,8].
 func placeholders(start int, ids []int64) (string, []any) {
 	ph := make([]string, 0, len(ids))
 	args := make([]any, 0, len(ids))

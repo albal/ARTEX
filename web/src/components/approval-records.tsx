@@ -483,7 +483,7 @@ export function ApprovalDetail({
                 </Collapsible>
               ) : null}
               <CodeBlock
-                label={`${initialLabel}：${actionLabels[audit.initial_action] ?? audit.initial_action}`}
+                label={`${initialLabel}: ${actionLabels[audit.initial_action] ?? audit.initial_action}`}
                 text={audit.initial_reason.replace(/^\[Model\]\s*/, "")}
               />
               <CodeBlock
